@@ -2,8 +2,6 @@
  * @see Network.h for description.
  * @author Adrien RICCIARDI
  */
-#if defined(__linux__) || defined(__CYGWIN__) // This file will compile on Linux only
-
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -70,5 +68,3 @@ int NetworkWaitForClient(int Server_Socket)
 
 	return Client_Socket;
 }
-
-#endif
