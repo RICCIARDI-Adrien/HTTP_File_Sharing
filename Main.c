@@ -108,9 +108,9 @@ static void HTTPCreateRootGetAnswer(char *String_File_Path, char *String_Answer)
 		if (String_File_Path[i] == '/') break;
 	}
 	// Was the file name beginning found ?
-	if (i > 0) String_File_Name = &String_File_Path[i + 1]; // +1 to bypass the '/' character
+	if (i >= 0) String_File_Name = &String_File_Path[i + 1]; // +1 to bypass the '/' character
 	else String_File_Name = String_File_Path;
-	
+
 	sprintf(String_Answer, "HTTP/1.0 302 Found\r\n"
 		"Server: HTTP File Sharing\r\n"
 		"Location: /%s\r\n"
