@@ -154,7 +154,7 @@ static int HTTPCreateFileGetAnswer(const char *String_File_Path, char *String_An
 //-------------------------------------------------------------------------------------------------
 int main(int argc, char *argv[])
 {
-	char *String_File_Path;
+	char *String_File_Path, String_Server_IP_Address[33];
 	int File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Return_Value = EXIT_FAILURE, Size;
 
 	// Check parameters
@@ -177,9 +177,12 @@ int main(int argc, char *argv[])
 	Server_Socket = NetworkCreateServer(SERVER_DEFAULT_BINDING_PORT);
 	if (Server_Socket == -1) goto Exit;
 	
-	// TODO : display downloading URL
-	
-	printf("Waiting for a client on port %d...\n", SERVER_DEFAULT_BINDING_PORT);
+	// Display the downloading URL
+	if (NetworkGetIPAddress(String_Server_IP_Address) == -1) goto Exit;
+	printf("Downloading URL : http://%s:%d\n", String_Server_IP_Address, SERVER_DEFAULT_BINDING_PORT);
+
+	// Wait for a client to connect
+	printf("Waiting for a client...\n");
 	Client_Socket = NetworkWaitForClient(Server_Socket);
 	if (Client_Socket == -1) goto Exit;
 	printf("Client connected.\n");

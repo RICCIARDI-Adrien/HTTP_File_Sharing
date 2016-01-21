@@ -68,3 +68,46 @@ int NetworkWaitForClient(int Server_Socket)
 
 	return Client_Socket;
 }
+
+int NetworkGetIPAddress(char *String_IP_Address)
+{
+	struct sockaddr_in Address;
+	socklen_t Address_Size;
+	int Socket, Return_Value = -1;
+
+	// Connect to the TEST-NET-1 IPv4 address (this address can't exist on a system, see RFC 5737) using UDP to find the interface address
+	// Create a socket
+	Socket = socket(AF_INET, SOCK_DGRAM, 0);
+	if (Socket == -1)
+	{
+		printf("[%s] Error : could not create the socket (%s).\n", __func__, strerror(errno));
+		goto Exit;
+	}
+	
+	// Fill the TEST-NET-1 address
+	Address.sin_family = AF_INET;
+	Address.sin_port = htons(80); // Use a random port
+	inet_aton("192.0.2.0", &Address.sin_addr);
+	// Connect to it
+	if (connect(Socket, (const struct sockaddr *) &Address, sizeof(Address)) == -1)
+	{
+		printf("[%s] Error : could not connect to the TEST-NET address (%s).\n", __func__, strerror(errno));
+		goto Exit;
+	}
+	
+	// Get the interface address
+	Address_Size = sizeof(Address);
+	if (getsockname(Socket, (struct sockaddr *) &Address, &Address_Size) != 0)
+	{
+		printf("[%s] Error : failed to retrieve the socket's IP address (%s).\n", __func__, strerror(errno));
+		goto Exit;
+	}
+	
+	// Convert the IP to a dotted string
+	strcpy(String_IP_Address, inet_ntoa(Address.sin_addr));
+	Return_Value = 0;
+	
+Exit:
+	if (Socket != -1) close(Socket);
+	return Return_Value;
+}

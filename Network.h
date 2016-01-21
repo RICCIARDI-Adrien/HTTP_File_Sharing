@@ -22,4 +22,11 @@ int NetworkCreateServer(unsigned short Port);
  */
 int NetworkWaitForClient(int Server_Socket);
 
+/** Retrieve the IP address of the main network interface.
+ * @param String_IP_Address On output, contain the IPv4 address converted to dotted format.
+ * @return -1 if an error occurred,
+ * @return 0 if the function succeeded.
+ */
+int NetworkGetIPAddress(char *String_IP_Address);
+
 #endif
