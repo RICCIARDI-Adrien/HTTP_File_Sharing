@@ -9,3 +9,11 @@ all:
 
 clean:
 	rm -f $(BINARY_NAME) $(BINARY_NAME).exe
+
+install:
+	@if [ $(shell id -u) -ne 0 ]; then printf "\033[31mThis rule must be started as root.\033[0m\n"; false; fi
+	cp $(BINARY_NAME) /usr/bin
+
+uninstall:
+	@if [ $(shell id -u) -ne 0 ]; then printf "\033[31mThis rule must be started as root.\033[0m\n"; false; fi
+	rm -f /usr/bin/$(BINARY_NAME)
