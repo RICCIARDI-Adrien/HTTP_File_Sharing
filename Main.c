@@ -125,23 +125,25 @@ static void HTTPCreateRootGetAnswer(char *String_File_Path, char *String_Answer)
 }
 
 /** Create the HTTP answer to the HTTP GET /File_Name request.
- * @param String_File_Path The file path.
- * @param String_Answer On output, contain the whole answer to send to the browser.
+ * @param Pointer_String_File_Path The file path.
+ * @param Pointer_String_Answer On output, contain the whole answer to send to the browser.
+ * @param Pointer_File_Size On output, contain the file to send size in bytes.
  * @return -1 if an error occurred,
  * @return 0 if the function succeeded.
  */
-static int HTTPCreateFileGetAnswer(const char *String_File_Path, char *String_Answer)
+static int HTTPCreateFileGetAnswer(const char *Pointer_String_File_Path, char *Pointer_String_Answer, unsigned long long *Pointer_File_Size)
 {
 	struct stat File_Status;
 	
 	// Retrieve the file size
-	if (stat(String_File_Path, &File_Status) == -1)
+	if (stat(Pointer_String_File_Path, &File_Status) == -1)
 	{
-		printf("[%s] Error : stat() failed (%s).\n", __func__, strerror(errno));
+		printf("[%s] Error : stat() failed (%s).\n", __FUNCTION__, strerror(errno));
 		return -1;
 	}
+	*Pointer_File_Size = File_Status.st_size;
 	
-	sprintf(String_Answer, "HTTP/1.0 200 OK\r\n"
+	sprintf(Pointer_String_Answer, "HTTP/1.0 200 OK\r\n"
 		"Server: HTTP File Sharing\r\n"
 		"Content-Type: application/octet-stream\r\n"
 		"Content-Length: %llu\r\n\r\n", (unsigned long long) File_Status.st_size);
@@ -164,7 +166,8 @@ static void MainDisplayProgramUsage(char *Pointer_String_Program_Name)
 int main(int argc, char *argv[])
 {
 	char *Pointer_String_File_Path = NULL, String_Server_IP_Address[33];
-	int i, File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Return_Value = EXIT_FAILURE, Size, Server_Port = SERVER_DEFAULT_BINDING_PORT;
+	int i, File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Return_Value = EXIT_FAILURE, Size, Server_Port = SERVER_DEFAULT_BINDING_PORT, Previous_Percentage = -1, New_Percentage; // Set previous percentage to an invalid value to make sure it is displayed the first time
+	unsigned long long File_Size, Sent_File_Bytes_Count = 0;
 
 	// Check parameters
 	for (i = 1; i < argc; i++)
@@ -236,7 +239,7 @@ int main(int argc, char *argv[])
 	// Read the browser "GET / HTTP/1.1" request
 	HTTPReadRequest(Client_Socket);
 	
-	// Send an HTML answer redirecting to the file to download
+	// Send an HTTP answer redirecting to the file to download
 	HTTPCreateRootGetAnswer(Pointer_String_File_Path, String_Buffer);
 	Size = strlen(String_Buffer); // Cache the buffer length
 	if (write(Client_Socket, String_Buffer, Size) < Size)
@@ -253,8 +256,8 @@ int main(int argc, char *argv[])
 	// Read the browser "GET /<file name> HTTP/1.1" request
 	HTTPReadRequest(Client_Socket);
 	
-	// Send an HTML answer specifying the file to download
-	HTTPCreateFileGetAnswer(Pointer_String_File_Path, String_Buffer);
+	// Send an HTTP answer specifying the file to download
+	HTTPCreateFileGetAnswer(Pointer_String_File_Path, String_Buffer, &File_Size);
 	Size = strlen(String_Buffer); // Cache the buffer length
 	if (write(Client_Socket, String_Buffer, Size) < Size)
 	{
@@ -263,26 +266,37 @@ int main(int argc, char *argv[])
 	}
 	
 	// Send the file content
-	printf("Sending file...\n");
-	while (1)
+	do
 	{
 		// Read a block of data from the file
 		Size = read(File_Descriptor, Buffer, sizeof(Buffer));
 		if (Size < 0)
 		{
-			printf("Error when reading the file content (%s).\n", strerror(errno));
+			printf("\nError when reading the file content (%s).\n", strerror(errno));
 			goto Exit;
 		}
-		else if (Size == 0) break;
 		
 		// Send it to the browser
-		if (write(Client_Socket, Buffer, Size) < Size)
+		if (Size > 0)
 		{
-			printf("Error when sending the file content to the browser (%s).\n", strerror(errno));
-			goto Exit;
+			if (write(Client_Socket, Buffer, Size) < Size)
+			{
+				printf("\nError when sending the file content to the browser (%s).\n", strerror(errno));
+				goto Exit;
+			}
 		}
-	}
-	printf("File successfully sent.\n");
+		
+		// Display sending percentage
+		Sent_File_Bytes_Count += Size;
+		New_Percentage = 100 * Sent_File_Bytes_Count / File_Size;
+		if (New_Percentage != Previous_Percentage) // Display percentage only when it changes to avoid loosing performances with too many console prints
+		{
+			printf("Sending file... %d%%\r", New_Percentage);
+			fflush(stdout);
+			Previous_Percentage = New_Percentage;
+		}
+	} while (Size > 0);
+	printf("\nFile successfully sent.\n");
 	
 	Return_Value = EXIT_SUCCESS;
 	
