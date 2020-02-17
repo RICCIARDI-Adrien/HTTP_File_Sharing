@@ -149,37 +149,83 @@ static int HTTPCreateFileGetAnswer(const char *String_File_Path, char *String_An
 	return 0;
 }
 
+/** Display the usage string. */
+static void MainDisplayProgramUsage(char *Pointer_String_Program_Name)
+{
+	printf("Usage : %s [-h | --help] [-p Port] File_To_Send\n"
+		"  -h,--help : display this help.\n"
+		"  -p Port : specify the port the server will bind to.\n"
+		"  File_To_Send : the file the server will send.\n", Pointer_String_Program_Name);
+}
+
 //-------------------------------------------------------------------------------------------------
 // Entry point
 //-------------------------------------------------------------------------------------------------
 int main(int argc, char *argv[])
 {
-	char *String_File_Path, String_Server_IP_Address[33];
-	int File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Return_Value = EXIT_FAILURE, Size;
+	char *Pointer_String_File_Path = NULL, String_Server_IP_Address[33];
+	int i, File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Return_Value = EXIT_FAILURE, Size, Server_Port = SERVER_DEFAULT_BINDING_PORT;
 
 	// Check parameters
-	if (argc != 2)
+	for (i = 1; i < argc; i++)
 	{
-		printf("Error : bad parameters.\nUsage : %s File_To_Send\n", argv[0]);
+		// Handle "help" argument
+		if ((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0))
+		{
+			MainDisplayProgramUsage(argv[0]);
+			return EXIT_SUCCESS;
+		}
+		// Handle "set server port" argument
+		else if (strcmp(argv[i], "-p") == 0)
+		{
+			// Is another argument following this one ?
+			if (i == argc - 1) // This is the last command-line argument
+			{
+				printf("Error : port number is missing after -p command-line argument.\n");
+				goto Exit;
+			}
+			
+			// Retrieve port value
+			if (sscanf(argv[i + 1], "%d", &Server_Port) != 1)
+			{
+				printf("Error : invalid port number.\n");
+				goto Exit;
+			}
+			if ((Server_Port < 0) || (Server_Port > 65535))
+			{
+				printf("Error : port value must be within 0 and 65535.\n");
+				goto Exit;
+			}
+			
+			// Bypass next argument as it was the port number
+			i++;
+		}
+		// Handle "file to send" argument
+		else Pointer_String_File_Path = argv[i];
+	}
+	
+	// Make sure a file has been provided
+	if (Pointer_String_File_Path == NULL)
+	{
+		MainDisplayProgramUsage(argv[0]);
 		goto Exit;
 	}
-	String_File_Path = argv[1];
 	
 	// Try to open the file
-	File_Descriptor = open(String_File_Path, O_RDONLY);
+	File_Descriptor = open(Pointer_String_File_Path, O_RDONLY);
 	if (File_Descriptor == -1)
 	{
-		printf("Error : failed to open the file '%s' (%s).\n", String_File_Path, strerror(errno));
+		printf("Error : failed to open the file '%s' (%s).\n", Pointer_String_File_Path, strerror(errno));
 		goto Exit;
 	}
 	
 	// Start a server
-	Server_Socket = NetworkCreateServer(SERVER_DEFAULT_BINDING_PORT);
+	Server_Socket = NetworkCreateServer((unsigned short) Server_Port);
 	if (Server_Socket == -1) goto Exit;
 	
 	// Display the downloading URL
 	if (NetworkGetIPAddress(String_Server_IP_Address) == -1) goto Exit;
-	printf("Downloading URL : http://%s:%d\n", String_Server_IP_Address, SERVER_DEFAULT_BINDING_PORT);
+	printf("Downloading URL : http://%s:%d\n", String_Server_IP_Address, Server_Port);
 
 	// Wait for a client to connect
 	printf("Waiting for a client...\n");
@@ -191,7 +237,7 @@ int main(int argc, char *argv[])
 	HTTPReadRequest(Client_Socket);
 	
 	// Send an HTML answer redirecting to the file to download
-	HTTPCreateRootGetAnswer(String_File_Path, String_Buffer);
+	HTTPCreateRootGetAnswer(Pointer_String_File_Path, String_Buffer);
 	Size = strlen(String_Buffer); // Cache the buffer length
 	if (write(Client_Socket, String_Buffer, Size) < Size)
 	{
@@ -208,7 +254,7 @@ int main(int argc, char *argv[])
 	HTTPReadRequest(Client_Socket);
 	
 	// Send an HTML answer specifying the file to download
-	HTTPCreateFileGetAnswer(String_File_Path, String_Buffer);
+	HTTPCreateFileGetAnswer(Pointer_String_File_Path, String_Buffer);
 	Size = strlen(String_Buffer); // Cache the buffer length
 	if (write(Client_Socket, String_Buffer, Size) < Size)
 	{
