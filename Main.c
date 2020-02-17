@@ -4,7 +4,9 @@
  */
 #include <errno.h>
 #include <fcntl.h>
-#include <features.h> // Needed by _FILE_OFFSET_BITS macro defined in the makefile so it is available before the headers are included
+#ifndef __APPLE__ // The following file is not present on macOS
+	#include <features.h> // Needed by _FILE_OFFSET_BITS macro defined in the makefile so it is available before the headers are included
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
