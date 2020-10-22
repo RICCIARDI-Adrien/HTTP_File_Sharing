@@ -156,8 +156,9 @@ static int HTTPCreateFileGetAnswer(const char *Pointer_String_File_Path, char *P
 /** Display the usage string. */
 static void MainDisplayProgramUsage(char *Pointer_String_Program_Name)
 {
-	printf("Usage : %s [-h | --help] [-p Port] File_To_Send\n"
+	printf("Usage : %s [-h | --help] [-k] [-p Port] File_To_Send\n"
 		"  -h,--help : display this help.\n"
+		"  -k : keep serving the same file, do not exit after the first download. Use Ctrl+C to quit.\n"
 		"  -p Port : specify the port the server will bind to.\n"
 		"  File_To_Send : the file the server will send.\n", Pointer_String_Program_Name);
 }
@@ -168,8 +169,8 @@ static void MainDisplayProgramUsage(char *Pointer_String_Program_Name)
 int main(int argc, char *argv[])
 {
 	char *Pointer_String_File_Path = NULL, String_Server_IP_Address[33];
-	int i, File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Return_Value = EXIT_FAILURE, Size, Server_Port = SERVER_DEFAULT_BINDING_PORT, Previous_Percentage = -1, New_Percentage; // Set previous percentage to an invalid value to make sure it is displayed the first time
-	unsigned long long File_Size, Sent_File_Bytes_Count = 0;
+	int i, File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Size, Server_Port = SERVER_DEFAULT_BINDING_PORT, Is_Multiple_Downloads_Enabled = 0, Previous_Percentage, New_Percentage;
+	unsigned long long File_Size, Sent_File_Bytes_Count;
 
 	// Check parameters
 	for (i = 1; i < argc; i++)
@@ -180,6 +181,8 @@ int main(int argc, char *argv[])
 			MainDisplayProgramUsage(argv[0]);
 			return EXIT_SUCCESS;
 		}
+		// Handle "keep going" argument
+		else if (strcmp(argv[i], "-k") == 0) Is_Multiple_Downloads_Enabled = 1;
 		// Handle "set server port" argument
 		else if (strcmp(argv[i], "-p") == 0)
 		{
@@ -187,19 +190,19 @@ int main(int argc, char *argv[])
 			if (i == argc - 1) // This is the last command-line argument
 			{
 				printf("Error : port number is missing after -p command-line argument.\n");
-				goto Exit;
+				goto Exit_Error;
 			}
 			
 			// Retrieve port value
 			if (sscanf(argv[i + 1], "%d", &Server_Port) != 1)
 			{
 				printf("Error : invalid port number.\n");
-				goto Exit;
+				goto Exit_Error;
 			}
 			if ((Server_Port < 0) || (Server_Port > 65535))
 			{
 				printf("Error : port value must be within 0 and 65535.\n");
-				goto Exit;
+				goto Exit_Error;
 			}
 			
 			// Bypass next argument as it was the port number
@@ -213,98 +216,113 @@ int main(int argc, char *argv[])
 	if (Pointer_String_File_Path == NULL)
 	{
 		MainDisplayProgramUsage(argv[0]);
-		goto Exit;
+		goto Exit_Error;
 	}
 	
-	// Try to open the file
-	File_Descriptor = open(Pointer_String_File_Path, O_RDONLY);
-	if (File_Descriptor == -1)
-	{
-		printf("Error : failed to open the file '%s' (%s).\n", Pointer_String_File_Path, strerror(errno));
-		goto Exit;
-	}
-	
-	// Start a server
-	Server_Socket = NetworkCreateServer((unsigned short) Server_Port);
-	if (Server_Socket == -1) goto Exit;
-	
-	// Display the downloading URL
-	if (NetworkGetIPAddress(String_Server_IP_Address) == -1) goto Exit;
-	printf("Downloading URL : http://%s:%d\n", String_Server_IP_Address, Server_Port);
-
-	// Wait for a client to connect
-	printf("Waiting for a client...\n");
-	Client_Socket = NetworkWaitForClient(Server_Socket);
-	if (Client_Socket == -1) goto Exit;
-	printf("Client connected.\n");
-	
-	// Read the browser "GET / HTTP/1.1" request
-	HTTPReadRequest(Client_Socket);
-	
-	// Send an HTTP answer redirecting to the file to download
-	HTTPCreateRootGetAnswer(Pointer_String_File_Path, String_Buffer);
-	Size = strlen(String_Buffer); // Cache the buffer length
-	if (write(Client_Socket, String_Buffer, Size) < Size)
-	{
-		printf("Error : failed to send the HTTP GET / answer to the browser.\n");
-		goto Exit;
-	}
-	
-	// The browser will now close the connection and open a new one to get the file
-	close(Client_Socket);
-	Client_Socket = NetworkWaitForClient(Server_Socket);
-	if (Client_Socket == -1) goto Exit;
-	
-	// Read the browser "GET /<file name> HTTP/1.1" request
-	HTTPReadRequest(Client_Socket);
-	
-	// Send an HTTP answer specifying the file to download
-	HTTPCreateFileGetAnswer(Pointer_String_File_Path, String_Buffer, &File_Size);
-	Size = strlen(String_Buffer); // Cache the buffer length
-	if (write(Client_Socket, String_Buffer, Size) < Size)
-	{
-		printf("Error : failed to send the HTTP GET /File_Name answer to the browser.\n");
-		goto Exit;
-	}
-	
-	// Send the file content
+	// Create server
 	do
 	{
-		// Read a block of data from the file
-		Size = read(File_Descriptor, Buffer, sizeof(Buffer));
-		if (Size < 0)
+		// Reset needed variables in case looping is enabled
+		Previous_Percentage = -1; // Set previous percentage to an invalid value to make sure it is displayed the first time
+		Sent_File_Bytes_Count = 0;
+		
+		// Try to open the file
+		File_Descriptor = open(Pointer_String_File_Path, O_RDONLY);
+		if (File_Descriptor == -1)
 		{
-			printf("\nError when reading the file content (%s).\n", strerror(errno));
-			goto Exit;
+			printf("Error : failed to open the file '%s' (%s).\n", Pointer_String_File_Path, strerror(errno));
+			goto Exit_Error;
+		}
+	
+		// Start a server
+		Server_Socket = NetworkCreateServer((unsigned short) Server_Port);
+		if (Server_Socket == -1) goto Exit_Error;
+	
+		// Display the downloading URL
+		if (NetworkGetIPAddress(String_Server_IP_Address) == -1) goto Exit_Error;
+		printf("Downloading URL : http://%s:%d\n", String_Server_IP_Address, Server_Port);
+
+		// Wait for a client to connect
+		printf("Waiting for a client...\n");
+		Client_Socket = NetworkWaitForClient(Server_Socket);
+		if (Client_Socket == -1) goto Exit_Error;
+		printf("Client connected.\n");
+	
+		// Read the browser "GET / HTTP/1.1" request
+		HTTPReadRequest(Client_Socket);
+	
+		// Send an HTTP answer redirecting to the file to download
+		HTTPCreateRootGetAnswer(Pointer_String_File_Path, String_Buffer);
+		Size = strlen(String_Buffer); // Cache the buffer length
+		if (write(Client_Socket, String_Buffer, Size) < Size)
+		{
+			printf("Error : failed to send the HTTP GET / answer to the browser.\n");
+			goto Exit_Error;
 		}
 		
-		// Send it to the browser
-		if (Size > 0)
+		// The browser will now close the connection and open a new one to get the file
+		close(Client_Socket);
+		Client_Socket = NetworkWaitForClient(Server_Socket);
+		if (Client_Socket == -1) goto Exit_Error;
+		
+		// Read the browser "GET /<file name> HTTP/1.1" request
+		HTTPReadRequest(Client_Socket);
+		
+		// Send an HTTP answer specifying the file to download
+		HTTPCreateFileGetAnswer(Pointer_String_File_Path, String_Buffer, &File_Size);
+		Size = strlen(String_Buffer); // Cache the buffer length
+		if (write(Client_Socket, String_Buffer, Size) < Size)
 		{
-			if (write(Client_Socket, Buffer, Size) < Size)
+			printf("Error : failed to send the HTTP GET /File_Name answer to the browser.\n");
+			goto Exit_Error;
+		}
+		
+		// Send the file content
+		do
+		{
+			// Read a block of data from the file
+			Size = read(File_Descriptor, Buffer, sizeof(Buffer));
+			if (Size < 0)
 			{
-				printf("\nError when sending the file content to the browser (%s).\n", strerror(errno));
-				goto Exit;
+				printf("\nError when reading the file content (%s).\n", strerror(errno));
+				goto Exit_Error;
 			}
-		}
+			
+			// Send it to the browser
+			if (Size > 0)
+			{
+				if (write(Client_Socket, Buffer, Size) < Size)
+				{
+					printf("\nError when sending the file content to the browser (%s).\n", strerror(errno));
+					goto Exit_Error;
+				}
+			}
+			
+			// Display sending percentage
+			Sent_File_Bytes_Count += Size;
+			New_Percentage = 100 * Sent_File_Bytes_Count / File_Size;
+			if (New_Percentage != Previous_Percentage) // Display percentage only when it changes to avoid loosing performances with too many console prints
+			{
+				printf("Sending file... %d%%\r", New_Percentage);
+				fflush(stdout);
+				Previous_Percentage = New_Percentage;
+			}
+		} while (Size > 0);
 		
-		// Display sending percentage
-		Sent_File_Bytes_Count += Size;
-		New_Percentage = 100 * Sent_File_Bytes_Count / File_Size;
-		if (New_Percentage != Previous_Percentage) // Display percentage only when it changes to avoid loosing performances with too many console prints
-		{
-			printf("Sending file... %d%%\r", New_Percentage);
-			fflush(stdout);
-			Previous_Percentage = New_Percentage;
-		}
-	} while (Size > 0);
-	printf("\nFile successfully sent.\n");
+		// Release all resources
+		close(File_Descriptor);
+		close(Client_Socket);
+		close(Server_Socket);
+		
+		printf("\nFile successfully sent.\n");
+	} while (Is_Multiple_Downloads_Enabled);
 	
-	Return_Value = EXIT_SUCCESS;
+	// Everything went fine
+	return EXIT_SUCCESS;
 	
-Exit:
+Exit_Error:
 	if (File_Descriptor != -1) close(File_Descriptor);
 	if (Client_Socket != -1) close(Client_Socket);
 	if (Server_Socket != -1) close(Server_Socket);
-	return Return_Value;
+	return EXIT_FAILURE;
 }
