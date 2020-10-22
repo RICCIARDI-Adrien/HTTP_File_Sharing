@@ -171,6 +171,12 @@ int main(int argc, char *argv[])
 	char *Pointer_String_File_Path = NULL, String_Server_IP_Address[33];
 	int i, File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Size, Server_Port = SERVER_DEFAULT_BINDING_PORT, Is_Multiple_Downloads_Enabled = 0, Previous_Percentage, New_Percentage;
 	unsigned long long File_Size, Sent_File_Bytes_Count;
+	
+	// Display banner
+	printf("+--------------------------------+\n");
+	printf("|       HTTP file sharing        |\n");
+	printf("| (C) 2015-2020 Adrien RICCIARDI |\n");
+	printf("+--------------------------------+\n\n");
 
 	// Check parameters
 	for (i = 1; i < argc; i++)
