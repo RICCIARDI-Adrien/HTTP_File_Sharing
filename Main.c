@@ -297,7 +297,7 @@ int main(int argc, char *argv[])
 				if (write(Client_Socket, Buffer, Size) < Size)
 				{
 					printf("\nError when sending the file content to the browser (%s).\n", strerror(errno));
-					goto Exit_Error;
+					break;
 				}
 			}
 			
@@ -316,8 +316,9 @@ int main(int argc, char *argv[])
 		close(File_Descriptor);
 		close(Client_Socket);
 		close(Server_Socket);
-		
-		printf("\nFile successfully sent.\n");
+
+		// Display the success message only if the whole file was sent
+		if (Size == 0) printf("\nFile successfully sent.\n");
 	} while (Is_Multiple_Downloads_Enabled);
 	
 	// Everything went fine
