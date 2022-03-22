@@ -24,73 +24,69 @@
 //-------------------------------------------------------------------------------------------------
 // Private variables
 //-------------------------------------------------------------------------------------------------
-/** The HTTP line buffer. */
-static char String_Buffer[1024 * 1024]; // 1MB should be overkill
-
 /** The buffer used to transfer the file content to the browser. */
 static unsigned char Buffer[4096];
 
 //-------------------------------------------------------------------------------------------------
 // Private functions
 //-------------------------------------------------------------------------------------------------
-/** Read an HTTP line (terminated by CRLF).
- * @param File_Descriptor The file descriptor to read from.
- * @param String_Line On ouput, contain the read line. Make sure that the buffer is large enough to contain the whole line.
- * @return The read string length in characters (the terminating CRLF are replaced by a zero).
- */
-static int HTTPReadLine(int File_Descriptor, char *String_Line)
-{
-	int i = 0;
-	ssize_t Result;
-	char Character;
-	
-	while (1)
-	{
-		// Read one byte
-		Result = read(File_Descriptor, &Character, 1);
-		if (Result < 0) printf("[%s] Error : failed to read from the file descriptor (%s).\n", __func__, strerror(errno));
-		if (Result <= 0)
-		{
-			String_Line[i] = 0; // Append terminating zero
-			return i;
-		}
-		
-		// Are CRLF received ?
-		if ((i > 0) && (String_Line[i - 1] == '\r') && (Character == '\n'))
-		{
-			// Put a terminating zero at CR location
-			String_Line[i - 1] = 0;
-			i--;
-			return i;
-		}
-		else
-		{
-			// Append the character to the line
-			String_Line[i] = Character;
-			i++;
-		}
-	}
-}
-
 /** Read a whole HTTP request received from the browser.
  * @param File_Descriptor The file descriptor to read from.
+ * @param Pointer_String_Path On output, contain the file path extracted from the request.
+ * @param Maximum_String_Length The size of the string buffer, including the terminating zero.
+ * @return -1 if an error occurred,
+ * @return 0 on success.
  */
-static void HTTPReadRequest(int File_Descriptor)
+static int HTTPReadRequest(int File_Descriptor, char *Pointer_String_URI, size_t Maximum_String_Length)
 {
-	int Length;
-	
-	// Read the browser "GET / HTTP/1.1" request
-	if (HTTPReadLine(File_Descriptor, String_Buffer) == 0)
+	static char String_Temporary[1024 * 1024], *Pointer_String_Temporary; // Temporary string buffer size should be enough for most requests
+	ssize_t Bytes_Count;
+
+	// Retrieve the request
+	Bytes_Count = read(File_Descriptor, String_Temporary, sizeof(String_Temporary) - 1);
+	if (Bytes_Count == -1) // Did an error occur ?
 	{
-		printf("Warning : the browser did not send an HTTP GET request.\n");
-		return;
+		printf("Failed to receive the HTTP request (%s).\n", strerror(errno));
+		return -1;
 	}
-	
-	// Discard all remaining lines (like Host or User-Agent)
-	do
+	if (((size_t) Bytes_Count) == sizeof(String_Temporary) - 1) // Is the request too long ?
 	{
-		Length = HTTPReadLine(File_Descriptor, String_Buffer);
-	} while (Length > 0);
+		printf("The HTTP request is too big.\n");
+		return -1;
+	}
+	// Make sure the string is terminated
+	String_Temporary[Bytes_Count] = 0;
+
+	// Is this a GET request ?
+	if (strncmp(String_Temporary, "GET ", 4) != 0)
+	{
+		printf("Error : the browser sent an unexpected request (a GET request was expected).\n");
+		return -1;
+	}
+
+	// Extract the URI from the request
+	Pointer_String_Temporary = &String_Temporary[4]; // Bypass the initial "GET "
+	while (Maximum_String_Length > 1)
+	{
+		// Stop if the URI string end is reached
+		if (*Pointer_String_Temporary == ' ') break;
+
+		// Stop if the request string end is reached (this should not happen)
+		if (*Pointer_String_Temporary == 0)
+		{
+			printf("Error : the browser sent a malformed request or a too long URI.\n");
+			return -1;
+		}
+
+		// Copy the next URI character
+		*Pointer_String_URI = *Pointer_String_Temporary;
+		Pointer_String_URI++;
+		Pointer_String_Temporary++;
+		Maximum_String_Length--;
+	}
+	*Pointer_String_URI = 0; // Terminate the string
+
+	return 0;
 }
 
 /** Create the HTTP answer to the HTTP GET / request.
@@ -157,7 +153,7 @@ static int HTTPCreateFileGetAnswer(const char *Pointer_String_File_Path, char *P
 static void MainDisplayProgramUsage(char *Pointer_String_Program_Name)
 {
 	printf("Usage : %s [-h | --help] [-k] [-p Port] File_To_Send\n"
-		"  -h,--help : display this help.\n"
+		"  -h, --help : display this help.\n"
 		"  -k : keep serving the same file, do not exit after the first download. Use Ctrl+C to quit.\n"
 		"  -p Port : specify the port the server will bind to.\n"
 		"  File_To_Send : the file the server will send.\n", Pointer_String_Program_Name);
@@ -168,6 +164,7 @@ static void MainDisplayProgramUsage(char *Pointer_String_Program_Name)
 //-------------------------------------------------------------------------------------------------
 int main(int argc, char *argv[])
 {
+	static char String_Buffer[1024 * 1024]; // 1MB should be overkill
 	char *Pointer_String_File_Path = NULL, String_Server_IP_Address[33];
 	int i, File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Size, Server_Port = SERVER_DEFAULT_BINDING_PORT, Is_Multiple_Downloads_Enabled = 0, Previous_Percentage, New_Percentage;
 	unsigned long long File_Size, Sent_File_Bytes_Count;
@@ -175,7 +172,7 @@ int main(int argc, char *argv[])
 	// Display banner
 	printf("+--------------------------------+\n");
 	printf("|       HTTP file sharing        |\n");
-	printf("| (C) 2015-2020 Adrien RICCIARDI |\n");
+	printf("| (C) 2015-2022 Adrien RICCIARDI |\n");
 	printf("+--------------------------------+\n\n");
 
 	// Check parameters
@@ -253,10 +250,10 @@ int main(int argc, char *argv[])
 		Client_Socket = NetworkWaitForClient(Server_Socket);
 		if (Client_Socket == -1) goto Exit_Error;
 		printf("Client connected.\n");
-	
+
 		// Read the browser "GET / HTTP/1.1" request
-		HTTPReadRequest(Client_Socket);
-	
+		if (HTTPReadRequest(Client_Socket, String_Buffer, sizeof(String_Buffer)) != 0) goto Exit_Error; // Error messages are already printed by HTTPReadRequest() function
+
 		// Send an HTTP answer redirecting to the file to download
 		HTTPCreateRootGetAnswer(Pointer_String_File_Path, String_Buffer);
 		Size = strlen(String_Buffer); // Cache the buffer length
@@ -270,10 +267,10 @@ int main(int argc, char *argv[])
 		close(Client_Socket);
 		Client_Socket = NetworkWaitForClient(Server_Socket);
 		if (Client_Socket == -1) goto Exit_Error;
-		
+
 		// Read the browser "GET /<file name> HTTP/1.1" request
-		HTTPReadRequest(Client_Socket);
-		
+		if (HTTPReadRequest(Client_Socket, String_Buffer, sizeof(String_Buffer)) != 0) goto Exit_Error; // Error messages are already printed by HTTPReadRequest() function
+
 		// Send an HTTP answer specifying the file to download
 		HTTPCreateFileGetAnswer(Pointer_String_File_Path, String_Buffer, &File_Size);
 		Size = strlen(String_Buffer); // Cache the buffer length
