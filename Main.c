@@ -122,33 +122,6 @@ static void HTTPCreateRootGetAnswer(char *String_File_Path, char *String_Answer)
 		"</html>", String_File_Name);
 }
 
-/** Create the HTTP answer to the HTTP GET /File_Name request.
- * @param Pointer_String_File_Path The file path.
- * @param Pointer_String_Answer On output, contain the whole answer to send to the browser.
- * @param Pointer_File_Size On output, contain the file to send size in bytes.
- * @return -1 if an error occurred,
- * @return 0 if the function succeeded.
- */
-static int HTTPCreateFileGetAnswer(const char *Pointer_String_File_Path, char *Pointer_String_Answer, unsigned long long *Pointer_File_Size)
-{
-	struct stat File_Status;
-	
-	// Retrieve the file size
-	if (stat(Pointer_String_File_Path, &File_Status) == -1)
-	{
-		printf("[%s] Error : stat() failed (%s).\n", __FUNCTION__, strerror(errno));
-		return -1;
-	}
-	*Pointer_File_Size = File_Status.st_size;
-	
-	sprintf(Pointer_String_Answer, "HTTP/1.0 200 OK\r\n"
-		"Server: HTTP File Sharing\r\n"
-		"Content-Type: application/octet-stream\r\n"
-		"Content-Length: %llu\r\n\r\n", (unsigned long long) File_Status.st_size);
-	
-	return 0;
-}
-
 /** Display the usage string. */
 static void MainDisplayProgramUsage(char *Pointer_String_Program_Name)
 {
@@ -168,6 +141,7 @@ int main(int argc, char *argv[])
 	char *Pointer_String_File_Path = NULL, String_Server_IP_Address[33];
 	int i, File_Descriptor = -1, Server_Socket = -1, Client_Socket = -1, Size, Server_Port = SERVER_DEFAULT_BINDING_PORT, Is_Multiple_Downloads_Enabled = 0, Previous_Percentage, New_Percentage;
 	unsigned long long File_Size, Sent_File_Bytes_Count;
+	struct stat File_Status;
 	
 	// Display banner
 	printf("+--------------------------------+\n");
@@ -240,10 +214,18 @@ int main(int argc, char *argv[])
 		// Start a server
 		Server_Socket = NetworkCreateServer((unsigned short) Server_Port);
 		if (Server_Socket == -1) goto Exit_Error;
+
+		// Retrieve the file size
+		if (stat(Pointer_String_File_Path, &File_Status) == -1)
+		{
+			printf("Error : stat() failed on the file '%s' (%s).\n", Pointer_String_File_Path, strerror(errno));
+			goto Exit_Error;
+		}
+		File_Size = File_Status.st_size;
 	
 		// Display the downloading URL
 		if (NetworkGetIPAddress(String_Server_IP_Address) == -1) goto Exit_Error;
-		printf("Downloading URL : http://%s:%d\n", String_Server_IP_Address, Server_Port);
+		printf("Downloading URL : http://%s:%d\nFile size : %llu bytes.\n", String_Server_IP_Address, Server_Port, File_Size);
 
 		// Wait for a client to connect
 		printf("Waiting for a client...\n");
@@ -272,7 +254,10 @@ int main(int argc, char *argv[])
 		if (HTTPReadRequest(Client_Socket, String_Buffer, sizeof(String_Buffer)) != 0) goto Exit_Error; // Error messages are already printed by HTTPReadRequest() function
 
 		// Send an HTTP answer specifying the file to download
-		HTTPCreateFileGetAnswer(Pointer_String_File_Path, String_Buffer, &File_Size);
+		sprintf(String_Buffer, "HTTP/1.0 200 OK\r\n"
+			"Server: HTTP File Sharing\r\n"
+			"Content-Type: application/octet-stream\r\n"
+			"Content-Length: %llu\r\n\r\n", File_Size);
 		Size = strlen(String_Buffer); // Cache the buffer length
 		if (write(Client_Socket, String_Buffer, Size) < Size)
 		{
